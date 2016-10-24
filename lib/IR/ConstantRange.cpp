@@ -821,17 +821,136 @@ ConstantRange::udiv(const ConstantRange &RHS) const {
   return ConstantRange(Lower, Upper);
 }
 
+APInt apMin(const APInt &a, const APInt &b) {
+  if (a.ult(b)) return a;
+  return b;
+}
+
+APInt apMax(const APInt &a, const APInt &b) {
+  if (a.ult(b)) return b;
+  return a;
+}
+
+APInt get2Comp(const APInt &a) {
+  return (~a)+1;
+}
+
+ConstantRange getLowerHalf(const ConstantRange &range) {
+  if (range.getLower().ule(range.getUpper()))
+    return range;
+  return ConstantRange(range.getUnsignedMin(),range.getUpper());
+}
+
+ConstantRange getUpperHalf(const ConstantRange &range) {
+  if (range.getLower().ule(range.getUpper()))
+    return ConstantRange(range.getBitWidth(), /*isFullSet=*/false);
+  return ConstantRange(range.getLower(),range.getUnsignedMax()+1);
+}
+
+
+APInt getMinAndR(const ConstantRange &a, const ConstantRange &b) {
+    APInt Probe = APInt::getBitsSet(a.getBitWidth(),a.getBitWidth()-1,a.getBitWidth());
+    APInt amin = a.getUnsignedMin();
+    APInt bmin = b.getUnsignedMin();
+    APInt tmp(a.getBitWidth(),0);
+
+    while (!Probe.isMinValue()) {
+        if (!(~amin & ~bmin & Probe).isMinValue()) {
+            tmp = (amin | Probe) & get2Comp(Probe);
+            if (tmp.ule(a.getUnsignedMax())) { amin = tmp; break; }
+            tmp = (bmin | Probe) & get2Comp(Probe);
+            if (tmp.ule(b.getUnsignedMax())) { bmin = tmp; break; }
+        }
+        Probe = Probe.lshr(1);
+    }
+    return amin & bmin;
+}
+
+APInt getMaxAndR(const ConstantRange &a, const ConstantRange &b) {
+    APInt Probe = APInt::getBitsSet(a.getBitWidth(),a.getBitWidth()-1,a.getBitWidth());
+    APInt amax = a.getUnsignedMax();
+    APInt bmax = b.getUnsignedMax();
+    APInt tmp(a.getBitWidth(),0);
+
+    while (!Probe.isMinValue()) {
+        if (!(amax & ~bmax & Probe).isMinValue()) {
+            tmp = (amax & ~Probe) | (Probe - 1);
+            if (tmp.uge(a.getUnsignedMin())) { amax = tmp; break; }
+        }
+        if (!(~amax & bmax & Probe).isMinValue()) {
+            tmp = (bmax & ~Probe) | (Probe - 1);
+            if (tmp.uge(b.getUnsignedMin())) { bmax = tmp; break; }
+        }
+        Probe = Probe.lshr(1);
+    }
+    return amax & bmax;
+}
+
+ConstantRange makeConstantRangeFromMinMax(APInt minv,APInt maxv) {
+    if (minv.isMinValue() && maxv.isMaxValue())
+        return ConstantRange(minv.getBitWidth(), /*isFullSet=*/true);
+    return ConstantRange(minv,maxv+1);
+}
+
 ConstantRange
 ConstantRange::binaryAnd(const ConstantRange &Other) const {
   if (isEmptySet() || Other.isEmptySet())
     return ConstantRange(getBitWidth(), /*isFullSet=*/false);
+    
+  ConstantRange st(getBitWidth(),false);
+  ConstantRange ah=getLowerHalf(*this);
+  ConstantRange bh=getLowerHalf(Other);
+  if (!ah.isEmptySet() && !bh.isEmptySet())
+      st=st.unionWith(makeConstantRangeFromMinMax(getMinAndR(ah,bh),getMaxAndR(ah,bh)));
 
-  // TODO: replace this with something less conservative
+  ConstantRange tmp=getUpperHalf(Other);
+  if (!ah.isEmptySet() && !tmp.isEmptySet())
+      st=st.unionWith(makeConstantRangeFromMinMax(getMinAndR(ah,tmp),getMaxAndR(ah,tmp)));
 
-  APInt umin = APIntOps::umin(Other.getUnsignedMax(), getUnsignedMax());
-  if (umin.isAllOnesValue())
-    return ConstantRange(getBitWidth(), /*isFullSet=*/true);
-  return ConstantRange(APInt::getNullValue(getBitWidth()), umin + 1);
+  ah = getUpperHalf(*this);
+  if (!ah.isEmptySet() && !bh.isEmptySet())
+      st = st.unionWith(makeConstantRangeFromMinMax(getMinAndR(ah,bh),getMaxAndR(ah,bh)));
+  if (!ah.isEmptySet() && !tmp.isEmptySet())
+      st = st.unionWith(makeConstantRangeFromMinMax(getMinAndR(ah,tmp),getMaxAndR(ah,tmp)));
+  return st;
+}
+
+APInt getMinOrR(const ConstantRange &a, const ConstantRange &b) {
+    APInt Probe = APInt::getBitsSet(a.getBitWidth(),a.getBitWidth()-1,a.getBitWidth());
+    APInt amin = a.getUnsignedMin();
+    APInt bmin = b.getUnsignedMin();
+    APInt tmp(a.getBitWidth(),0);
+
+    while (!Probe.isMinValue()) {
+        if (!(~amin & bmin & Probe).isMinValue()) {
+            tmp = (amin | Probe) & get2Comp(Probe);
+            if (tmp.ule(a.getUnsignedMax())) { amin = tmp; break; }
+        }
+        if (!(amin & ~bmin & Probe).isMinValue()) {
+            tmp = (bmin | Probe) & get2Comp(Probe);
+            if (tmp.ule(b.getUnsignedMax())) { bmin = tmp; break; }
+        }
+        Probe = Probe.lshr(1);
+    }
+    return amin | bmin;
+}
+
+APInt getMaxOrR(const ConstantRange &a, const ConstantRange &b) {
+    APInt Probe = APInt::getBitsSet(a.getBitWidth(),a.getBitWidth()-1,a.getBitWidth());
+    APInt amax = a.getUnsignedMax();
+    APInt bmax = b.getUnsignedMax();
+    APInt tmp(a.getBitWidth(),0);
+
+    while (!Probe.isMinValue()) {
+        if (!(amax & bmax & Probe).isMinValue()) {
+            tmp = (amax & ~Probe) | (Probe - 1);
+            if (tmp.uge(a.getUnsignedMin())) { amax = tmp; break; }
+            tmp = (bmax & ~Probe) | (Probe - 1);
+            if (tmp.uge(b.getUnsignedMin())) { bmax = tmp; break; }
+        }
+        Probe = Probe.lshr(1);
+    }
+    return amax | bmax;
 }
 
 ConstantRange
@@ -839,12 +958,44 @@ ConstantRange::binaryOr(const ConstantRange &Other) const {
   if (isEmptySet() || Other.isEmptySet())
     return ConstantRange(getBitWidth(), /*isFullSet=*/false);
 
-  // TODO: replace this with something less conservative
+  ConstantRange st(getBitWidth(),false);
+  ConstantRange ah=getUpperHalf(*this);
+  ConstantRange bh=getUpperHalf(Other);
+  if (!ah.isEmptySet() && !bh.isEmptySet())
+      st=st.unionWith(makeConstantRangeFromMinMax(getMinOrR(ah,bh),getMaxOrR(ah,bh)));
 
-  APInt umax = APIntOps::umax(getUnsignedMin(), Other.getUnsignedMin());
-  if (umax.isMinValue())
-    return ConstantRange(getBitWidth(), /*isFullSet=*/true);
-  return ConstantRange(umax, APInt::getNullValue(getBitWidth()));
+  ConstantRange tmp=getLowerHalf(Other);
+  if (!ah.isEmptySet() && !tmp.isEmptySet())
+      st = st.unionWith(makeConstantRangeFromMinMax(getMinOrR(ah,tmp),getMaxOrR(ah,tmp)));
+
+  ah = getLowerHalf(*this);
+  if (!ah.isEmptySet() && !bh.isEmptySet())
+      st = st.unionWith(makeConstantRangeFromMinMax(getMinOrR(ah,bh),getMaxOrR(ah,bh)));
+  if (!ah.isEmptySet() && !tmp.isEmptySet())
+      st = st.unionWith(makeConstantRangeFromMinMax(getMinOrR(ah,tmp),getMaxOrR(ah,tmp)));
+
+  return st;
+
+}
+
+void shlRange(ConstantRange &pos, const ConstantRange &a,const ConstantRange &b) {
+  if (a.isEmptySet() || b.isEmptySet())
+    return;
+  
+  APInt rangeZero = APInt(a.getBitWidth(),(a.getUnsignedMin() ^ a.getUnsignedMax()).countLeadingZeros());
+  APInt iter = b.getUnsignedMin();
+  APInt rangeMax = apMin(APInt(a.getBitWidth(),a.getBitWidth()),b.getUnsignedMax());
+
+  if (b.getUnsignedMax().uge(a.getBitWidth()))
+    pos = pos.unionWith(ConstantRange(APInt::getNullValue(a.getBitWidth()),APInt::getNullValue(a.getBitWidth())+1));
+  for (;iter.ule(rangeMax);++iter) {
+    if (iter.ugt(rangeZero)) {
+      pos = pos.unionWith(makeConstantRangeFromMinMax(APInt::getNullValue(a.getBitWidth()),APInt::getAllOnesValue(a.getBitWidth()).shl(iter)));
+      break;
+    }
+    pos = pos.unionWith(makeConstantRangeFromMinMax(a.getUnsignedMin().shl(iter),a.getUnsignedMax().shl(iter)));
+    if (iter.eq(rangeMax)) break;
+  }
 }
 
 ConstantRange
@@ -852,16 +1003,19 @@ ConstantRange::shl(const ConstantRange &Other) const {
   if (isEmptySet() || Other.isEmptySet())
     return ConstantRange(getBitWidth(), /*isFullSet=*/false);
 
-  APInt min = getUnsignedMin().shl(Other.getUnsignedMin());
-  APInt max = getUnsignedMax().shl(Other.getUnsignedMax());
+  ConstantRange pos(getBitWidth(), /*isFullSet=*/false);
 
-  // there's no overflow!
-  APInt Zeros(getBitWidth(), getUnsignedMax().countLeadingZeros());
-  if (Zeros.ugt(Other.getUnsignedMax()))
-    return ConstantRange(min, max + 1);
+  ConstantRange ah = getLowerHalf(*this);
+  ConstantRange bh = getUpperHalf(Other);
+  ConstantRange tmp = getUpperHalf(*this);
 
-  // FIXME: implement the other tricky cases
-  return ConstantRange(getBitWidth(), /*isFullSet=*/true);
+  shlRange(pos,ah,bh);
+  shlRange(pos,tmp,bh);
+  bh = getLowerHalf(Other);
+  shlRange(pos,ah,bh);
+  shlRange(pos,tmp,bh);
+
+  return pos;
 }
 
 ConstantRange

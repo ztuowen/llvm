@@ -512,8 +512,8 @@ TEST_F(ConstantRangeTest, UDiv) {
 TEST_F(ConstantRangeTest, Shl) {
   EXPECT_EQ(Full.shl(Full), Full);
   EXPECT_EQ(Full.shl(Empty), Empty);
-  EXPECT_EQ(Full.shl(One), Full);    // TODO: [0, (-1 << 0xa) + 1)
-  EXPECT_EQ(Full.shl(Some), Full);   // TODO: [0, (-1 << 0xa) + 1)
+  EXPECT_EQ(Full.shl(One), ConstantRange(APInt(16,0),APInt(16,0xfc01)));    // TODO: [0, (-1 << 0xa) + 1)
+  EXPECT_EQ(Full.shl(Some), ConstantRange(APInt(16,0),APInt(16,0xfc01)));   // TODO: [0, (-1 << 0xa) + 1)
   EXPECT_EQ(Full.shl(Wrap), Full);
   EXPECT_EQ(Empty.shl(Empty), Empty);
   EXPECT_EQ(Empty.shl(One), Empty);
@@ -521,10 +521,10 @@ TEST_F(ConstantRangeTest, Shl) {
   EXPECT_EQ(Empty.shl(Wrap), Empty);
   EXPECT_EQ(One.shl(One), ConstantRange(APInt(16, 0xa << 0xa),
                                         APInt(16, (0xa << 0xa) + 1)));
-  EXPECT_EQ(One.shl(Some), Full);    // TODO: [0xa << 0xa, 0)
-  EXPECT_EQ(One.shl(Wrap), Full);    // TODO: [0xa, 0xa << 14 + 1)
-  EXPECT_EQ(Some.shl(Some), Full);   // TODO: [0xa << 0xa, 0xfc01)
-  EXPECT_EQ(Some.shl(Wrap), Full);   // TODO: [0xa, 0x7ff << 0x5 + 1)
+  EXPECT_EQ(One.shl(Some), ConstantRange(APInt(16,0),APInt(16,0xa001)));    // TODO: [0, 0xa001)
+  EXPECT_EQ(One.shl(Wrap), ConstantRange(APInt(16,0),APInt(16,0x1401)));    // TODO: [0, 0x1401)
+  EXPECT_EQ(Some.shl(Some), ConstantRange(APInt(16,0),APInt(16,0xfc01)));   // TODO: [0, 0xfc01)
+  EXPECT_EQ(Some.shl(Wrap), ConstantRange(APInt(16,0),APInt(16,0xffe1)));   // TODO: [0, 0xffe1)
   EXPECT_EQ(Wrap.shl(Wrap), Full);
 }
 
