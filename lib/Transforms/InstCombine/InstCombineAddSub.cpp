@@ -902,6 +902,9 @@ bool InstCombiner::WillNotOverflowSignedAdd(Value *LHS, Value *RHS,
   APInt RHSKnownOne(BitWidth, 0);
   computeKnownBits(RHS, RHSKnownZero, RHSKnownOne, 0, &CxtI);
 
+  if (((~RHSKnownZero) & (~LHSKnownZero)).isMinValue())
+    return true;
+
   // Addition of two 2's compliment numbers having opposite signs will never
   // overflow.
   if ((LHSKnownOne[BitWidth - 1] && RHSKnownZero[BitWidth - 1]) ||
