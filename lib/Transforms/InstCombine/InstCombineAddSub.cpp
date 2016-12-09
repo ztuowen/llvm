@@ -902,14 +902,28 @@ bool InstCombiner::WillNotOverflowSignedAdd(Value *LHS, Value *RHS,
   APInt RHSKnownOne(BitWidth, 0);
   computeKnownBits(RHS, RHSKnownZero, RHSKnownOne, 0, &CxtI);
 
-  if (((~RHSKnownZero) & (~LHSKnownZero)).isMinValue())
-    return true;
-
   // Addition of two 2's compliment numbers having opposite signs will never
   // overflow.
   if ((LHSKnownOne[BitWidth - 1] && RHSKnownZero[BitWidth - 1]) ||
       (LHSKnownZero[BitWidth - 1] && RHSKnownOne[BitWidth - 1]))
     return true;
+
+  // Force non overflow 
+  if (LHSKnownZero[BitWidth - 1] || RHSKnownZero[BitWidth - 1]) {
+    APInt LHSBase(~LHSKnownZero);
+    APInt RHSBase(~RHSKnownZero);
+    LHSBase.clearBit(BitWidth - 1);
+    RHSBase.clearBit(BitWidth - 1);
+    APInt AdditionRes(LHSBase + RHSBase);
+    if (AdditionRes[BitWidth - 1] == 0)
+      return true;
+  }
+  // Force overflow
+  if (LHSKnownOne[BitWidth - 1] && RHSKnownOne[BitWidth - 1]) {
+    APInt AdditionRes(LHSKnownOne + RHSKnownOne);
+    if (AdditionRes[BitWidth - 1] == 1)
+      return true;
+  }
 
   // Check if carry bit of addition will not cause overflow.
   if (checkRippleForAdd(LHSKnownZero, RHSKnownZero))
